@@ -1,0 +1,1774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Shift Scheduler</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Firebase (Firestore) — shared cloud storage so everyone's availability persists across visits/devices -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<style>
+  :root{
+    color-scheme: dark;
+    --bg:#0A0A0B;
+    --panel:#141416;
+    --panel-2:#1C1C1F;
+    --border:#2C2C30;
+    --text:#F2F2F3;
+    --text-dim:#99999A;
+    --amber:#1E4DA8;
+    --cyan:#1FA556;
+    --overlap:#4E7FE0;
+    --danger:#EF4444;
+    --success:#1FA556;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:'Inter',sans-serif;
+    padding:0 0 60px;
+  }
+  .mono{font-family:'JetBrains Mono',monospace;}
+  .wrap{max-width:1080px;margin:0 auto;padding:14px 20px 0;}
+
+  /* header */
+  header{
+    display:flex;justify-content:space-between;align-items:center;
+    background:#00205B;border-radius:12px;
+    padding:20px 24px;margin:0 0 26px;
+    flex-wrap:wrap;gap:16px;
+  }
+  .brand{display:flex;flex-direction:column;gap:4px;}
+  .brand .eyebrow{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:11px;letter-spacing:.18em;color:#3DD68C;
+    text-transform:uppercase;font-weight:600;
+  }
+  .brand h1{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:26px;margin:0;font-weight:700;letter-spacing:-0.01em;color:#FFFFFF;
+  }
+  .clocks{display:flex;gap:22px;}
+  .clock{text-align:right;}
+  .clock .label{font-size:10px;letter-spacing:.14em;color:#9FB6DC;text-transform:uppercase;}
+  .clock .time{font-size:20px;font-weight:600;color:#FFFFFF;}
+  .clock.pt .time{color:#3DD68C;}
+  .clock.utc .time{color:#8FC6FF;}
+  .clock.admin input{border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.08);color:#FFFFFF;border-radius:6px;}
+  .clock.admin input::placeholder{color:rgba(255,255,255,.5);}
+  .clock.admin .btn-ghost{border-color:rgba(255,255,255,.35);color:#FFFFFF;padding:5px 10px;}
+  .clock.admin .btn-ghost:hover{border-color:#FFFFFF;}
+  .admin-badge{font-size:11px;color:#3DD68C;font-weight:600;}
+
+  /* panel */
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:14px 16px;
+    margin-bottom:12px;
+  }
+  .panel h2{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:13px;margin:0 0 2px;font-weight:600;
+    display:flex;align-items:center;gap:6px;
+  }
+  .panel h2 .idx{color:var(--text-dim);font-weight:500;}
+  .panel .desc{color:var(--text-dim);font-size:11.5px;margin:0 0 10px;line-height:1.4;}
+
+  /* timeline */
+  .axis{position:relative;height:22px;margin-left:118px;margin-bottom:6px;}
+  .tick{position:absolute;top:0;font-size:10px;color:var(--text-dim);transform:translateX(-50%);text-align:center;}
+  .tick .pt{color:var(--text);font-weight:600;}
+  .tick .utc{color:var(--cyan);}
+  .tick::before{content:'';position:absolute;left:50%;top:18px;width:1px;height:6px;background:var(--border);}
+
+  .track-area{position:relative;margin-left:118px;height:2px;background:var(--border);margin-bottom:14px;}
+
+  .rows{display:flex;flex-direction:column;gap:10px;}
+  .row{display:flex;align-items:center;gap:0;}
+  .row .rlabel{
+    width:118px;flex:0 0 118px;font-size:12px;color:var(--text-dim);
+    padding-right:12px;
+  }
+  .row .rlabel b{display:block;color:var(--text);font-size:13px;}
+  .track{position:relative;flex:1;height:34px;background:var(--panel-2);border-radius:6px;overflow:visible;}
+  .bar{
+    position:absolute;top:0;bottom:0;border-radius:6px;
+    display:flex;align-items:center;justify-content:center;
+    font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;
+    color:#FFFFFF;
+  }
+  .bar.bar-open{
+    opacity:.5;font-style:italic;color:var(--text)!important;
+    background:var(--panel-2)!important;border:1px dashed var(--text-dim);
+  }
+  .bar-handle{
+    position:absolute;top:0;bottom:0;width:10px;cursor:ew-resize;z-index:3;
+    transition:background .1s;
+  }
+  .bar-handle-left{left:-3px;border-radius:6px 0 0 6px;}
+  .bar-handle-right{right:-3px;border-radius:0 6px 6px 0;}
+  .bar-handle:hover,.bar-handle.dragging{background:rgba(255,255,255,.3);}
+  .shift4-toggle-row{
+    display:inline-flex;align-items:center;gap:7px;font-size:11.5px;
+    color:var(--text-dim);text-transform:none;letter-spacing:normal;
+    margin:0 0 12px;cursor:pointer;
+  }
+  .shift4-toggle-row input{width:15px;height:15px;accent-color:var(--overlap);}
+  .row-available{
+    font-size:11px;color:var(--text-dim);margin-left:118px;line-height:1.5;
+    max-height:0;overflow:hidden;opacity:0;margin-bottom:0;
+    transition:max-height .15s ease,opacity .15s ease,margin-bottom .15s ease;
+  }
+  .row:hover + .row-available,
+  .row-available:hover{
+    max-height:140px;opacity:1;margin-bottom:10px;
+  }
+  .row{cursor:default;}
+  .row-available .ra-label{
+    font-weight:600;text-transform:uppercase;letter-spacing:.04em;font-size:9.5px;
+    color:var(--overlap);margin-right:6px;
+  }
+  .overlap-band{
+    background-color:rgba(78,127,224,.22);
+    border-left:1px dashed var(--overlap);
+    border-right:1px dashed var(--overlap);
+    z-index:2;
+  }
+  .overlap-tag{
+    position:absolute;top:-22px;transform:translateX(-50%);
+    font-size:9.5px;letter-spacing:.06em;color:var(--overlap);
+    text-transform:uppercase;white-space:nowrap;font-weight:600;
+  }
+
+  .legend{display:flex;gap:18px;margin-top:16px;flex-wrap:wrap;}
+  .legend .item{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-dim);}
+  .legend .swatch{width:10px;height:10px;border-radius:3px;}
+
+  /* form */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr;}}
+  label{display:block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim);margin-bottom:4px;margin-top:9px;}
+  .quick-link{color:var(--overlap);text-decoration:none;font-weight:600;letter-spacing:.03em;cursor:pointer;}
+  .quick-link:hover{text-decoration:underline;}
+  label:first-child{margin-top:0;}
+  input[type=text],input[type=date],input[type=number]{
+    width:100%;background:var(--panel-2);border:1px solid var(--border);
+    color:var(--text);padding:6px 9px;border-radius:6px;font-size:13px;
+    font-family:'Inter',sans-serif;
+  }
+  input:focus{outline:none;border-color:var(--amber);}
+  select{
+    width:100%;background:var(--panel-2);border:1px solid var(--border);
+    color:var(--text);padding:7px 9px;border-radius:6px;font-size:13px;
+    font-family:'Inter',sans-serif;
+  }
+  select:focus{outline:none;border-color:var(--amber);}
+  select option{background:var(--panel-2);color:var(--text);}
+  .shift-check{
+    display:flex;align-items:center;justify-content:space-between;
+    background:var(--panel-2);border:1px solid var(--border);
+    border-radius:6px;padding:10px 12px;margin-bottom:8px;cursor:pointer;
+    transition:border-color .15s;
+  }
+  .shift-check:hover{border-color:#9FB6C9;}
+  .shift-check.checked{border-color:var(--amber);}
+  .shift-check .sname{font-size:13px;}
+  .shift-check .stime{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);}
+  .shift-check input{width:16px;height:16px;accent-color:var(--amber);}
+
+  button{
+    font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:12.5px;
+    letter-spacing:.03em;border:none;border-radius:6px;padding:8px 14px;
+    cursor:pointer;transition:opacity .15s;
+  }
+  button:hover{opacity:.88;}
+  .btn-primary{background:var(--amber);color:#FFFFFF;margin-top:10px;width:100%;}
+  .btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 10px;font-size:11px;}
+
+  /* roster */
+  .roster-shift{margin-bottom:10px;}
+  .roster-shift:last-child{margin-bottom:0;}
+  .roster-shift .rh{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;}
+  .roster-shift .rh .name{font-size:12.5px;font-weight:600;}
+  .roster-shift .rh .count{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);}
+  .person-chip{
+    display:inline-flex;align-items:center;gap:8px;
+    background:var(--panel-2);border:1px solid var(--border);
+    border-radius:20px;padding:5px 6px 5px 12px;margin:0 6px 6px 0;font-size:12.5px;
+  }
+  .person-chip .del{
+    background:var(--panel);border:none;color:var(--text-dim);
+    width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:11px;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .person-chip .del:hover{color:var(--overlap);}
+  .empty{color:var(--text-dim);font-size:12.5px;font-style:italic;}
+
+  .status{font-size:12px;color:var(--success);margin-top:10px;min-height:16px;}
+  .note{font-size:11.5px;color:var(--text-dim);margin-top:14px;line-height:1.5;}
+
+  /* day strip */
+  .daystrip{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;}
+  .daystrip::-webkit-scrollbar{height:6px;}
+  .daystrip::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+  .daychip{
+    flex:0 0 56px;background:var(--panel-2);border:1px solid var(--border);
+    border-radius:8px;padding:9px 4px;text-align:center;cursor:pointer;
+    transition:border-color .15s,background .15s;
+  }
+  .daychip:hover{border-color:#9FB6C9;}
+  .daychip.active{border-color:var(--amber);background:rgba(30,77,168,.12);}
+  .daychip.today .dnum{color:var(--amber);}
+  .daychip .dow{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim);}
+  .daychip .dnum{font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:700;margin:3px 0;}
+  .daychip .dcount{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--overlap);}
+  .daychip .dcount.zero{color:var(--text-dim);opacity:.5;}
+  .selected-date-label{font-family:'Space Grotesk',sans-serif;font-weight:600;color:var(--amber);}
+
+  .sunrise-note{font-size:11.5px;color:var(--cyan);margin-top:14px;}
+
+  .shift-select-group{display:flex;flex-direction:column;gap:8px;}
+  .shift-btn{
+    display:flex;align-items:center;justify-content:space-between;
+    background:var(--panel-2);border:1px solid var(--border);
+    border-radius:6px;padding:10px 12px;cursor:pointer;
+    transition:border-color .15s;
+  }
+  .shift-btn:hover{border-color:#9FB6C9;}
+  .shift-btn.active{border-color:var(--amber);background:rgba(30,77,168,.10);}
+  .shift-btn .sname{font-size:13px;}
+  .shift-btn .stime{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);}
+
+  .dow-group{display:flex;gap:6px;flex-wrap:wrap;}
+  .dow-btn{
+    flex:1 1 0;min-width:40px;padding:9px 0;text-align:center;
+    background:var(--panel-2);border:1px solid var(--border);border-radius:6px;
+    cursor:pointer;font-size:11.5px;color:var(--text-dim);
+    transition:border-color .15s,color .15s,background .15s;
+  }
+  .dow-btn:hover{border-color:#9FB6C9;}
+  .dow-btn.active{border-color:var(--cyan);background:rgba(31,165,86,.14);color:var(--text);}
+
+  .template-shift{margin-bottom:18px;}
+  .template-shift:last-child{margin-bottom:0;}
+  .template-shift .th{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+  .template-shift .th .name{font-size:12.5px;font-weight:600;}
+  .check-mark{color:var(--success);font-weight:700;}
+  .template-chip{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:var(--panel-2);border:1px solid var(--border);
+    border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:12.5px;
+  }
+  .template-chip .tname{font-weight:500;}
+  .template-chip .tdays{color:var(--cyan);font-family:'JetBrains Mono',monospace;font-size:10.5px;}
+  .template-chip .del{
+    background:var(--panel);border:none;color:var(--text-dim);
+    width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:11px;flex:0 0 auto;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .template-chip .del:hover{color:var(--overlap);}
+
+  .stat-banner{border-color:var(--amber);padding:10px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  .stat-banner h2{font-size:12px;margin:0;}
+  .stat-grid{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  .stat{background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:6px 12px;min-width:0;display:flex;align-items:baseline;gap:6px;}
+  .stat-num{font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700;color:var(--amber);line-height:1;}
+  .stat-label{font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;}
+
+  .gap-banner{
+    border-color:var(--danger);background:rgba(239,68,68,.06);
+    padding:12px 16px;margin-top:12px;
+  }
+  .gap-banner-head{margin-bottom:8px;}
+  .gap-banner-title{
+    font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;color:var(--danger);
+  }
+  .gap-row{
+    display:flex;justify-content:space-between;align-items:center;gap:12px;
+    background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--danger);
+    border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:12px;
+  }
+  .gap-row:last-child{margin-bottom:0;}
+  .gap-main{display:flex;align-items:baseline;gap:8px;}
+  .gap-day{font-family:'Space Grotesk',sans-serif;font-weight:700;}
+  .gap-shift{color:var(--text-dim);font-size:11.5px;}
+  .gap-detail{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--danger);font-weight:600;white-space:nowrap;}
+  .gap-more{font-size:11px;color:var(--text-dim);margin-top:4px;}
+
+  .slotsrow{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px;}
+  .slotitem{background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;min-width:110px;}
+  .slotitem label{margin:0 0 6px;font-size:10px;}
+  .slotitem input{width:56px;padding:6px 8px;font-size:13px;}
+
+  .schedule-scroll{max-height:440px;overflow-y:auto;margin-top:6px;border:1px solid var(--border);border-radius:8px;}
+  .schedule-table{width:100%;border-collapse:collapse;font-size:12px;}
+  .schedule-table th{
+    position:sticky;top:0;background:var(--panel-2);text-align:left;color:var(--text-dim);
+    font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;padding:8px 10px;
+    border-bottom:1px solid var(--border);
+  }
+  .schedule-table td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top;}
+  .schedule-table td.datecell{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);white-space:nowrap;}
+  .schedule-table td.unfilled{color:var(--text-dim);font-style:italic;}
+  .schedule-table tr.today td{background:rgba(30,77,168,.06);}
+
+  .drag-roster{
+    display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 12px;
+    padding:10px;background:var(--panel-2);border:1px dashed var(--border);border-radius:8px;
+  }
+  .drag-roster:empty{display:none;}
+  .drag-chip{
+    background:var(--panel);border:1px solid var(--border);border-radius:20px;
+    padding:5px 12px;font-size:12px;cursor:grab;user-select:none;
+  }
+  .drag-chip:active{cursor:grabbing;}
+  .drag-edit-note{font-size:11.5px;color:var(--text-dim);margin:4px 0 0;}
+  .schedule-table td.schedule-cell{transition:background .1s;}
+  .schedule-table td.schedule-cell.drag-over{background:rgba(78,127,224,.15);outline:2px dashed var(--overlap);outline-offset:-2px;}
+  .schedule-chip{
+    display:inline-flex;align-items:center;gap:5px;
+    background:var(--panel-2);border:1px solid var(--border);border-radius:14px;
+    padding:3px 4px 3px 10px;margin:2px 4px 2px 0;font-size:12px;cursor:grab;
+  }
+  .schedule-chip:active{cursor:grabbing;}
+  .schedule-chip .chip-x{
+    background:var(--panel);border:none;color:var(--text-dim);
+    width:16px;height:16px;border-radius:50%;cursor:pointer;font-size:10px;
+    display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;
+  }
+  .schedule-chip .chip-x:hover{color:var(--danger);}
+  .unfilled-label{color:var(--text-dim);font-style:italic;}
+
+  #weeklyShiftList{max-height:420px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:2px 10px;}
+  .weekly-shift-row{
+    display:flex;align-items:center;gap:10px;
+    padding:9px 4px;border-bottom:1px solid var(--border);
+  }
+  .weekly-shift-row:last-child{border-bottom:none;}
+  .weekly-shift-row.wsl-today{background:rgba(30,77,168,.06);}
+  .weekly-shift-row .wsl-day{font-weight:600;font-size:12.5px;min-width:56px;flex:0 0 auto;}
+  .weekly-shift-row .wsl-shifts{display:flex;gap:6px;flex-wrap:wrap;flex:0 1 auto;}
+  .wsl-badge{
+    font-size:10.5px;padding:4px 10px;border-radius:12px;
+    background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);
+    white-space:nowrap;cursor:pointer;font-family:'Inter',sans-serif;transition:all .12s;
+  }
+  .wsl-badge:hover{border-color:var(--overlap);color:var(--text);}
+  .wsl-badge.wsl-off{
+    background:rgba(239,68,68,.12);border-color:var(--danger);color:var(--danger);
+    text-decoration:line-through;
+  }
+  .wsl-badge.wsl-off:hover{opacity:.8;}
+  .wsl-note-input{
+    flex:1 1 auto;min-width:80px;background:var(--panel-2);border:1px solid var(--border);
+    color:var(--text);padding:5px 9px;border-radius:6px;font-size:11.5px;
+    font-family:'Inter',sans-serif;
+  }
+  .wsl-note-input::placeholder{color:var(--text-dim);}
+  .wsl-note-input:focus{outline:none;border-color:var(--overlap);}
+
+  .period-tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;margin-bottom:14px;border-bottom:1px solid var(--border);}
+  .period-tabs::-webkit-scrollbar{height:6px;}
+  .period-tabs::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+  .period-tab{
+    flex:0 0 auto;padding:9px 16px;border-radius:8px 8px 0 0;
+    background:var(--panel-2);border:1px solid var(--border);border-bottom:none;
+    font-size:12px;color:var(--text-dim);cursor:pointer;white-space:nowrap;
+    font-family:'Space Grotesk',sans-serif;font-weight:600;transition:color .15s,background .15s;
+  }
+  .period-tab:hover{color:var(--text);}
+  .period-tab.active{background:var(--panel);color:var(--amber);border-color:var(--amber);}
+
+  details.panel{padding:0;overflow:hidden;}
+  details.panel > summary{
+    list-style:none;cursor:pointer;padding:13px 16px;user-select:none;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+  }
+  details.panel > summary::-webkit-details-marker{display:none;}
+  details.panel > summary::after{
+    content:'▾';color:var(--text-dim);font-size:11px;flex:0 0 auto;
+    transition:transform .15s;
+  }
+  details.panel[open] > summary::after{transform:rotate(180deg);}
+  details.panel > summary h2{margin:0;}
+  details.panel > .panel-body{padding:0 16px 14px;}
+  details.panel > summary:hover h2{color:var(--amber);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <h1>Shift Scheduler</h1>
+    </div>
+    <div class="clocks">
+      <div class="clock pt">
+        <div class="label">Pacific</div>
+        <div class="time mono" id="clockPT">--:--:--</div>
+      </div>
+      <div class="clock utc">
+        <div class="label">UTC</div>
+        <div class="time mono" id="clockUTC">--:--:--</div>
+      </div>
+      <div class="clock admin">
+        <div class="label">Admin</div>
+        <div id="adminControl">
+          <input type="password" id="adminPasscode" placeholder="Passcode" style="width:100px;padding:5px 8px;font-size:11px;">
+          <button class="btn-ghost" id="adminUnlockBtn" style="margin-left:4px;">Unlock</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="period-tabs" id="periodTabs"></div>
+
+  <div class="panel stat-banner">
+    <h2>Staffing Estimate</h2>
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-num" id="statPeople">–</div>
+        <div class="stat-label">people needed</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num" id="statHours">–</div>
+        <div class="stat-label">hrs/week per person</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel stat-banner">
+    <h2>Roster Load</h2>
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-num" id="statRosterCount">–</div>
+        <div class="stat-label">on the roster</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num" id="statRosterHours">–</div>
+        <div class="stat-label">avg hrs/week if spread evenly</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel gap-banner" id="gapBanner" style="display:none;">
+    <div class="gap-banner-head">
+      <span class="gap-banner-title">⚠ Coverage gap<span id="gapBannerCount"></span></span>
+    </div>
+    <div id="gapBannerList"></div>
+  </div>
+
+  <details class="panel" open>
+    <summary><h2><span class="idx">01</span> Shift Timeline</h2></summary>
+    <div class="panel-body">
+    <p class="desc">Drag the edge of a shift block to make it longer or shorter, snapping to the nearest half hour. Shift 1's start follows sunrise by default — drag its left edge to set a fixed start time instead. Changes save automatically.</p>
+    <label class="shift4-toggle-row"><input type="checkbox" id="shift4Toggle"> Shift 4 active this period</label>
+    <div id="resetSunriseRow" style="display:none;margin-bottom:12px;">
+      <a href="#" id="resetSunriseBtn" class="quick-link">Reset Shift 1 to follow sunrise automatically</a>
+    </div>
+
+    <div class="axis" id="axis"></div>
+    <div class="track-area"></div>
+    <div class="rows" id="rows"></div>
+
+    <p class="sunrise-note" id="sunriseNote"></p>
+
+    <label style="margin-top:20px;">Pick a day (within the period above) to view its timeline and roster</label>
+    <div class="daystrip" id="dayStrip"></div>
+    <label for="fDate" style="margin-top:16px;">Jump to date</label>
+    <input type="date" id="fDate" style="max-width:200px;">
+    </div>
+  </details>
+
+  <details class="panel" open>
+    <summary><h2><span class="idx">02</span> Team Roster</h2></summary>
+    <div class="panel-body">
+    <p class="desc">Everyone available for scheduling this period. No need to specify shifts or days — everyone's assumed open any time, any shift, unless marked unavailable for something specific below.</p>
+
+    <label>Name</label>
+    <input type="text" id="rosterName" placeholder="Full name">
+    <button class="btn-primary" id="submitRosterBtn">Add to roster</button>
+    <div class="status" id="rosterStatus"></div>
+
+    <div id="rosterNameList" style="margin-top:16px;"></div>
+
+    <label style="margin-top:24px;">Mark someone unavailable</label>
+    <p class="note" style="margin-top:0;">Pick a team member, then click a shift on any date to mark them unavailable for it — click again to make them available again.</p>
+    <label for="wslPersonSelect">Team member</label>
+    <select id="wslPersonSelect"><option value="">Select a team member…</option></select>
+    <div id="weeklyShiftList" style="margin-top:14px;"></div>
+    </div>
+  </details>
+
+  <details class="panel" open>
+    <summary><h2><span class="idx">03</span> Generate Schedule</h2></summary>
+    <div class="panel-body">
+    <p class="desc">Builds one weekly pattern from everyone on the roster and repeats it across the whole period — so whatever gets assigned to a Monday is the same on every Monday in this stretch. Marked-unavailable dates are always honored, no exceptions. Balances the workload as evenly as possible across everyone instead of first-come-first-served, and never double-books someone on two shifts the same day. The only other rule: nobody opens the shift the day right after they closed the last one.</p>
+
+    <div class="slotsrow" id="slotsRow"></div>
+    <button class="btn-primary" id="generateBtn" style="max-width:240px;">Generate schedule</button>
+
+    <div id="dragEditNote"></div>
+    <div class="drag-roster" id="dragRoster"></div>
+    <div class="schedule-scroll"><table class="schedule-table" id="scheduleTable"></table></div>
+    </div>
+  </details>
+
+</div>
+
+<script>
+// ============================================================
+// FIREBASE SETUP — replace this with YOUR OWN project's config.
+// Firebase console → Project settings → General → "Your apps" → SDK setup and
+// configuration → pick "Config". Paste the object it gives you here.
+// ============================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyB-IhM1Uw-prmF6BVFn_6FmyTHfmIRUJOQ",
+  authDomain: "shift-scheduler-3f812.firebaseapp.com",
+  projectId: "shift-scheduler-3f812",
+  storageBucket: "shift-scheduler-3f812.firebasestorage.app",
+  messagingSenderId: "775953843243",
+  appId: "1:775953843243:web:62a8937065bef4a40bd66e"
+};
+
+let db = null;
+let firebaseReady = false;
+try{
+  // fails on purpose while firebaseConfig above still has placeholder values —
+  // caught here so the rest of the app stays usable (falls back to this browser's
+  // localStorage) instead of the whole page silently breaking.
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+  firebaseReady = true;
+}catch(e){
+  console.warn('Firebase not configured yet (or failed to connect) — using this browser\'s local storage instead. Replace firebaseConfig with your real project settings to share data across everyone.', e);
+}
+
+const FS_COLLECTION = 'shiftboard'; // all data lives as one doc per key in this collection
+
+// Thin shim matching the old storage.get/set/delete calls used throughout this file.
+// Uses Firestore when it's configured and reachable; otherwise falls back to
+// localStorage (this browser only) so the app never just stops working.
+const storage = {
+  async get(key){
+    if(firebaseReady){
+      try{
+        const snap = await db.collection(FS_COLLECTION).doc(key).get();
+        return snap.exists ? { key, value: snap.data().value } : null;
+      }catch(e){ console.warn('Firestore get failed, using local fallback:', e); }
+    }
+    const raw = localStorage.getItem(FS_COLLECTION+':'+key);
+    return raw ? { key, value: JSON.parse(raw).value } : null;
+  },
+  async set(key, value){
+    if(firebaseReady){
+      try{
+        await db.collection(FS_COLLECTION).doc(key).set({ value, updatedAt: Date.now() });
+        return { key, value };
+      }catch(e){ console.warn('Firestore set failed, using local fallback:', e); }
+    }
+    localStorage.setItem(FS_COLLECTION+':'+key, JSON.stringify({ value }));
+    return { key, value };
+  },
+  async delete(key){
+    if(firebaseReady){
+      try{
+        await db.collection(FS_COLLECTION).doc(key).delete();
+        return { key, deleted: true };
+      }catch(e){ console.warn('Firestore delete failed, using local fallback:', e); }
+    }
+    localStorage.removeItem(FS_COLLECTION+':'+key);
+    return { key, deleted: true };
+  }
+};
+
+const DEFAULT_SHIFTS = [
+  {id:'s1', name:'Shift 1', start:6.0,  end:11.5, color:'#1E4DA8'},
+  {id:'s2', name:'Shift 2', start:10.5, end:15.5, color:'#4E7FE0'},
+  {id:'s3', name:'Shift 3', start:14.5, end:19.0, color:'#1FA556'},
+  {id:'s4', name:'Shift 4', start:19.0, end:24.0, color:'#3D4048'},
+];
+let BASE_SHIFTS = DEFAULT_SHIFTS.map(s=>({...s}));
+let shift4Enabled = true;
+let shift1AutoStart = true; // true = follow sunrise automatically; false = manually dragged, fixed start
+// the shifts actually in use right now — everything downstream (timeline, pickers,
+// schedule generation) should read from this, not BASE_SHIFTS directly, so turning
+// Shift 4 off (or editing shift lengths) takes effect everywhere at once
+function activeShifts(){
+  return BASE_SHIFTS.filter(s => s.id!=='s4' || shift4Enabled);
+}
+// overlap windows are derived from whatever the shift times currently are, rather than
+// fixed clock times, so editing shift lengths (or dropping Shift 4) keeps them correct
+function computeOverlaps(shifts){
+  const overlaps = [];
+  for(let i=0;i<shifts.length-1;i++){
+    const a = shifts[i], b = shifts[i+1];
+    if(a.end > b.start) overlaps.push({start:b.start, end:a.end, affects:[a.id,b.id]});
+  }
+  return overlaps;
+}
+const STAFFING_BUFFER = 1.3; // 30% on top of the bare minimum headcount
+let currentSchedule = null; // dateStr -> {shiftId: [names]}, once generated/loaded
+
+// Lightweight admin gate — NOT real security (the passcode lives in this file's source,
+// so anyone who views page source can see it). It just hides delete controls from
+// regular people so nobody accidentally or casually edits someone else's entries.
+// Change this to whatever passcode you want before deploying.
+const ADMIN_PASSCODE = 'sifc-admin';
+let isAdmin = false;
+// window is 24h wide but offset from midnight so shifts have room to drift earlier/later with sunrise
+const AXIS_START = 3, AXIS_END = 27;
+function pct(h){ return (h-AXIS_START)/(AXIS_END-AXIS_START)*100; }
+
+// ---- drag-to-resize shift bars on the timeline ----
+let barDragState = null;
+function hourFromClientX(clientX, trackEl){
+  const rect = trackEl.getBoundingClientRect();
+  let frac = (clientX - rect.left) / rect.width;
+  frac = Math.max(0, Math.min(1, frac));
+  const hour = AXIS_START + frac*(AXIS_END-AXIS_START);
+  return Math.round(hour*2)/2; // snap to nearest 30 minutes
+}
+function startBarDrag(e, shiftId, edge, trackEl){
+  e.preventDefault();
+  e.stopPropagation();
+  barDragState = {shiftId, edge, trackEl};
+  if(shiftId===BASE_SHIFTS[0].id && edge==='start') shift1AutoStart = false;
+  e.currentTarget.classList.add('dragging');
+  document.addEventListener('mousemove', onBarDragMove);
+  document.addEventListener('mouseup', onBarDragEnd);
+}
+function onBarDragMove(e){
+  if(!barDragState) return;
+  const s = BASE_SHIFTS.find(x=>x.id===barDragState.shiftId);
+  if(!s) return;
+  const hour = hourFromClientX(e.clientX, barDragState.trackEl);
+  if(barDragState.edge==='start'){
+    if(hour <= s.end - 0.5) s.start = hour;
+  }else{
+    if(hour >= s.start + 0.5) s.end = hour;
+  }
+  const bar = barDragState.trackEl.querySelector('.bar');
+  if(bar){
+    bar.style.left = pct(s.start)+'%';
+    bar.style.width = (pct(s.end)-pct(s.start))+'%';
+  }
+}
+async function onBarDragEnd(){
+  if(!barDragState) return;
+  document.querySelectorAll('.bar-handle.dragging').forEach(el=>el.classList.remove('dragging'));
+  document.removeEventListener('mousemove', onBarDragMove);
+  document.removeEventListener('mouseup', onBarDragEnd);
+  barDragState = null;
+  await saveCurrentShiftConfig();
+  await refreshAfterShiftConfigChange();
+}
+
+
+function fmt24(hDec){
+  let h = Math.floor(hDec), m = Math.round((hDec-h)*60);
+  if(m===60){m=0;h+=1;}
+  h = ((h%24)+24)%24;
+  return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+}
+
+// Pacific is on permanent DST — fixed UTC-7 year-round, no seasonal offset changes.
+const PT_OFFSET = -7;
+
+function ptToUtc(hDec){
+  let u = hDec - PT_OFFSET; // UTC = PT - offset
+  const dayShift = Math.floor(u/24);
+  u = ((u%24)+24)%24;
+  return {label: fmt24(u), dayShift};
+}
+
+// converts a UTC instant to decimal hours in fixed-offset Pacific time (no DST lookup)
+function utcToFixedPT(date){
+  const shifted = new Date(date.getTime() + PT_OFFSET*3600000);
+  return shifted.getUTCHours() + shifted.getUTCMinutes()/60 + shifted.getUTCSeconds()/3600;
+}
+function fixedPTTimeString(date){
+  const shifted = new Date(date.getTime() + PT_OFFSET*3600000);
+  const h = String(shifted.getUTCHours()).padStart(2,'0');
+  const m = String(shifted.getUTCMinutes()).padStart(2,'0');
+  const s = String(shifted.getUTCSeconds()).padStart(2,'0');
+  return `${h}:${m}:${s}`;
+}
+
+// ---- Sunrise calculation (solar position algorithm, ~1 min accuracy) ----
+const rad = Math.PI/180;
+const dayMs = 1000*60*60*24, J1970 = 2440588, J2000 = 2451545;
+function toJulian(date){ return date.valueOf()/dayMs - 0.5 + J1970; }
+function fromJulian(j){ return new Date((j+0.5-J1970)*dayMs); }
+function toDays(date){ return toJulian(date) - J2000; }
+const obliquity = rad*23.4397;
+function declination(l){ return Math.asin(Math.sin(l)*Math.sin(obliquity)); }
+function solarMeanAnomaly(d){ return rad*(357.5291+0.98560028*d); }
+function eclipticLongitude(M){
+  const C = rad*(1.9148*Math.sin(M)+0.02*Math.sin(2*M)+0.0003*Math.sin(3*M));
+  const P = rad*102.9372;
+  return M+C+P+Math.PI;
+}
+function julianCycle(d,lw){ return Math.round(d - 0.0009 - lw/(2*Math.PI)); }
+function approxTransit(Ht,lw,n){ return 0.0009 + (Ht+lw)/(2*Math.PI) + n; }
+function solarTransitJ(ds,M,L){ return J2000+ds+0.0053*Math.sin(M)-0.0069*Math.sin(2*L); }
+function hourAngle(h,phi,d){ return Math.acos((Math.sin(h)-Math.sin(phi)*Math.sin(d))/(Math.cos(phi)*Math.cos(d))); }
+
+function getSunriseUTC(date, lat, lng){
+  const lw = rad*-lng, phi = rad*lat;
+  const d = toDays(date), n = julianCycle(d,lw), ds = approxTransit(0,lw,n);
+  const M = solarMeanAnomaly(ds), L = eclipticLongitude(M);
+  const dec = declination(L);
+  const Jnoon = solarTransitJ(ds,M,L);
+  const w = hourAngle(-0.833*rad, phi, dec);
+  const Jset = solarTransitJ(approxTransit(w,lw,n),M,L);
+  const Jrise = Jnoon - (Jset - Jnoon);
+  return fromJulian(Jrise);
+}
+
+// location used for the sunrise calculation (Kelowna, BC) — not exposed in the UI
+const SUNRISE_LAT = 49.888, SUNRISE_LON = -119.496;
+
+function getShiftsForDate(dateStr){
+  const sunriseUTC = getSunriseUTC(new Date(dateStr+'T12:00:00Z'), SUNRISE_LAT, SUNRISE_LON);
+  const sunrisePT = utcToFixedPT(sunriseUTC);
+  const rawStart = sunrisePT - 0.5;
+  let roundedStart = Math.round(rawStart*2)/2; // nearest :00 or :30
+  roundedStart = Math.min(roundedStart, 8.0); // never start later than 8:00 AM, regardless of sunrise
+  // Shift 1's start normally moves with sunrise automatically, unless it's been manually
+  // dragged — in which case it stays exactly where it was set, like any other shift.
+  // Everything else stays fixed so the two overlap windows (10:30–11:30 and 14:30–15:30)
+  // never drift, no matter the day.
+  const shifts = activeShifts().map((s,i)=> i===0 ? {...s, start: shift1AutoStart ? roundedStart : s.start} : {...s});
+  return {shifts, sunrisePT};
+}
+
+// ---- Timeline build (re-run whenever the date or location changes) ----
+const axis = document.getElementById('axis');
+const rows = document.getElementById('rows');
+
+async function renderTimeline(dateStr){
+  const {shifts, sunrisePT} = getShiftsForDate(dateStr);
+  const roster = await loadRoster();
+  const exceptions = await loadExceptions();
+  const dateExceptions = exceptions.filter(e=>e.date===dateStr);
+
+  axis.innerHTML = '';
+  [3,6,9,12,15,18,21,24].forEach(h=>{
+    const utc = ptToUtc(h);
+    const d = document.createElement('div');
+    d.className = 'tick';
+    d.style.left = pct(h)+'%';
+    d.innerHTML = `<div class="pt">${fmt24(h)}</div><div class="utc">${utc.label}${utc.dayShift?'+'+utc.dayShift:''}</div>`;
+    axis.appendChild(d);
+  });
+
+  rows.innerHTML = '';
+  shifts.forEach(s=>{
+    const row = document.createElement('div');
+    row.className = 'row';
+    const ptStart = fmt24(s.start), ptEnd = fmt24(s.end);
+    const uStart = ptToUtc(s.start), uEnd = ptToUtc(s.end);
+    row.innerHTML = `
+      <div class="rlabel"><b>${s.name}</b>${ptStart}–${ptEnd} PT</div>
+      <div class="track" data-shift="${s.id}"></div>
+    `;
+    rows.appendChild(row);
+    const track = row.querySelector('.track');
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    bar.style.left = pct(s.start)+'%';
+    bar.style.width = (pct(s.end)-pct(s.start))+'%';
+    bar.style.background = s.color;
+    const assigned = (currentSchedule && currentSchedule[dateStr] && currentSchedule[dateStr][s.id]) || [];
+    bar.textContent = assigned.length ? assigned.join(', ') : 'Open';
+    if(!assigned.length) bar.classList.add('bar-open');
+    bar.title = `${ptStart}–${ptEnd} PT`;
+    track.appendChild(bar);
+
+    const isS1 = s.id===BASE_SHIFTS[0].id;
+    const leftHandle = document.createElement('div');
+    leftHandle.className = 'bar-handle bar-handle-left';
+    leftHandle.title = isS1 ? (shift1AutoStart ? 'Drag to set a fixed start time (currently following sunrise)' : 'Drag to adjust the fixed start time') : '';
+    leftHandle.addEventListener('mousedown', (e)=> startBarDrag(e, s.id, 'start', track));
+    bar.appendChild(leftHandle);
+
+    const rightHandle = document.createElement('div');
+    rightHandle.className = 'bar-handle bar-handle-right';
+    rightHandle.addEventListener('mousedown', (e)=> startBarDrag(e, s.id, 'end', track));
+    bar.appendChild(rightHandle);
+
+    const excepted = new Set(dateExceptions.filter(e=>e.shiftIds.includes(s.id)).map(e=>e.name));
+    const available = roster.map(p=>p.name).filter(n=>!excepted.has(n)).sort((a,b)=>a.localeCompare(b));
+    const availRow = document.createElement('div');
+    availRow.className = 'row-available';
+    availRow.innerHTML = `<span class="ra-label">Available</span> ${available.length ? available.join(', ') : '<span class="empty">nobody on the roster</span>'}`;
+    rows.appendChild(availRow);
+  });
+
+  // overlay area aligned to the track columns only (excludes the row-label gutter)
+  rows.style.position = 'relative';
+  const overlayArea = document.createElement('div');
+  overlayArea.style.position = 'absolute';
+  overlayArea.style.left = '118px';
+  overlayArea.style.right = '0';
+  overlayArea.style.top = '0';
+  overlayArea.style.bottom = '0';
+  overlayArea.style.pointerEvents = 'none';
+  rows.appendChild(overlayArea);
+
+  // overlap bands — computed from the current shift times, so edits and Shift 4 stay in sync
+  computeOverlaps(shifts).forEach(o=>{
+    const affectedTracks = o.affects.map(id => rows.querySelector(`.track[data-shift="${id}"]`));
+    const top = Math.min(...affectedTracks.map(t=>t.offsetTop));
+    const bottom = Math.max(...affectedTracks.map(t=>t.offsetTop+t.offsetHeight));
+    const oStart = o.start, oEnd = o.end;
+
+    const band = document.createElement('div');
+    band.className = 'overlap-band';
+    band.style.position = 'absolute';
+    band.style.left = pct(oStart)+'%';
+    band.style.width = (pct(oEnd)-pct(oStart))+'%';
+    band.style.top = (top-4)+'px';
+    band.style.height = (bottom-top+8)+'px';
+    overlayArea.appendChild(band);
+  });
+
+  const niceDate = new Date(dateStr+'T00:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric'});
+  const cappedNote = shifts[0].start <= 8.0 && (sunrisePT-0.5) > 8.0 ? ' (capped at 8:00 latest start)' : '';
+  document.getElementById('sunriseNote').textContent =
+    `Sunrise on ${niceDate}: ${fmt24(sunrisePT)} PT → Shift 1 starts ${fmt24(shifts[0].start)} PT${cappedNote}.`;
+
+  return shifts;
+}
+
+// ---- Live clocks ----
+function tick(){
+  const now = new Date();
+  document.getElementById('clockPT').textContent = fixedPTTimeString(now);
+  document.getElementById('clockUTC').textContent = now.toLocaleTimeString('en-US',{timeZone:'UTC',hour12:false});
+}
+tick(); setInterval(tick,1000);
+
+document.getElementById('adminUnlockBtn').addEventListener('click', ()=>{
+  const input = document.getElementById('adminPasscode');
+  if(input.value === ADMIN_PASSCODE){
+    isAdmin = true;
+    document.getElementById('adminControl').innerHTML = '<span class="admin-badge">✓ Admin unlocked</span>';
+    renderRosterNameList();
+  renderWslPersonSelect();
+    renderStaffingEstimate(selectedDate);
+    renderScheduleTable(currentSchedule);
+  }else{
+    input.value = '';
+    input.placeholder = 'Wrong passcode';
+  }
+});
+document.getElementById('adminPasscode').addEventListener('keydown', (e)=>{
+  if(e.key==='Enter') document.getElementById('adminUnlockBtn').click();
+});
+
+const dowOrder = [1,2,3,4,5,6,0];
+const dowLabels = {1:'Mon',2:'Tue',3:'Wed',4:'Thu',5:'Fri',6:'Sat',0:'Sun'};
+
+let wslSelectedPerson = '';
+
+async function renderWslPersonSelect(){
+  const sel = document.getElementById('wslPersonSelect');
+  if(!sel) return;
+  const roster = await loadRoster();
+  const names = roster.map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+  sel.innerHTML = '<option value="">Select a team member…</option>' + names.map(n=>`<option value="${n}">${n}</option>`).join('');
+  if(wslSelectedPerson && names.includes(wslSelectedPerson)){
+    sel.value = wslSelectedPerson;
+  }else{
+    wslSelectedPerson = '';
+    sel.value = '';
+  }
+  renderWeeklyShiftList();
+}
+document.getElementById('wslPersonSelect').addEventListener('change', (e)=>{
+  wslSelectedPerson = e.target.value;
+  renderWeeklyShiftList();
+});
+
+// toggles a single person's availability for one shift on one specific date — writes
+// directly into the same unavailability list as Mark Unavailable
+async function togglePersonShiftDate(name, dateStr, shiftId){
+  let exceptions = await loadExceptions();
+  const hasIt = exceptions.some(e=> e.name===name && e.date===dateStr && e.shiftIds.includes(shiftId));
+  if(hasIt){
+    exceptions = exceptions
+      .map(e=> (e.name===name && e.date===dateStr && e.shiftIds.includes(shiftId))
+        ? {...e, shiftIds: e.shiftIds.filter(id=>id!==shiftId)}
+        : e)
+      .filter(e=> e.shiftIds.length>0);
+  }else{
+    exceptions.push({id:'x'+Date.now(), name, date:dateStr, shiftIds:[shiftId]});
+  }
+  await saveExceptions(exceptions);
+}
+
+async function renderWeeklyShiftList(){
+  const wrap = document.getElementById('weeklyShiftList');
+  if(!wrap) return;
+  wrap.innerHTML = '';
+
+  if(!wslSelectedPerson){
+    wrap.innerHTML = '<span class="empty">Select a team member above to see and edit their month.</span>';
+    return;
+  }
+
+  const exceptions = await loadExceptions();
+  const personExceptions = exceptions.filter(e=>e.name===wslSelectedPerson);
+  const dayNotes = await loadDayNotes();
+
+  DAYS.forEach(dateStr=>{
+    const d = new Date(dateStr+'T00:00:00Z');
+    const dow = d.toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short'});
+    const dnum = d.getUTCDate();
+    const row = document.createElement('div');
+    row.className = 'weekly-shift-row' + (dateStr===todayISO ? ' wsl-today' : '');
+    const dayLabel = document.createElement('span');
+    dayLabel.className = 'wsl-day';
+    dayLabel.textContent = `${dow} ${dnum}`;
+    const shiftsWrap = document.createElement('span');
+    shiftsWrap.className = 'wsl-shifts';
+    activeShifts().forEach(s=>{
+      const off = personExceptions.some(e=> e.date===dateStr && e.shiftIds.includes(s.id));
+      const badge = document.createElement('button');
+      badge.type = 'button';
+      badge.className = 'wsl-badge' + (off ? ' wsl-off' : '');
+      badge.textContent = s.name;
+      badge.title = off
+        ? `${wslSelectedPerson} is unavailable for ${s.name} on ${dow} ${dnum} — click to make them available again`
+        : `Click to mark ${wslSelectedPerson} unavailable for ${s.name} on ${dow} ${dnum}`;
+      badge.addEventListener('click', async ()=>{
+        await togglePersonShiftDate(wslSelectedPerson, dateStr, s.id);
+        const nowOff = badge.classList.toggle('wsl-off');
+        badge.title = nowOff
+          ? `${wslSelectedPerson} is unavailable for ${s.name} on ${dow} ${dnum} — click to make them available again`
+          : `Click to mark ${wslSelectedPerson} unavailable for ${s.name} on ${dow} ${dnum}`;
+        renderTimeline(selectedDate);
+        renderCoverageGaps();
+        renderDayStrip();
+      });
+      shiftsWrap.appendChild(badge);
+    });
+
+    const noteInput = document.createElement('input');
+    noteInput.type = 'text';
+    noteInput.className = 'wsl-note-input';
+    noteInput.placeholder = 'Note (optional)';
+    noteInput.value = dayNotes[noteKey(wslSelectedPerson, dateStr)] || '';
+    noteInput.addEventListener('blur', async ()=>{
+      const notes = await loadDayNotes();
+      const key = noteKey(wslSelectedPerson, dateStr);
+      const val = noteInput.value.trim();
+      if(val) notes[key] = val;
+      else delete notes[key];
+      await saveDayNotes(notes);
+    });
+    noteInput.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter') noteInput.blur();
+    });
+
+    row.appendChild(dayLabel);
+    row.appendChild(shiftsWrap);
+    row.appendChild(noteInput);
+    wrap.appendChild(row);
+  });
+}
+renderWeeklyShiftList();
+
+async function loadRoster(){
+  try{
+    const res = await storage.get('team-roster:'+activePeriodId, true);
+    return res ? JSON.parse(res.value) : [];
+  }catch(e){ return []; }
+}
+async function saveRoster(roster){
+  try{
+    await storage.set('team-roster:'+activePeriodId, JSON.stringify(roster), true);
+  }catch(e){ console.error('save failed', e); }
+}
+
+async function renderRosterNameList(){
+  const roster = await loadRoster();
+  const wrap = document.getElementById('rosterNameList');
+  if(!wrap) return;
+  wrap.innerHTML = '';
+  if(!roster.length){
+    wrap.innerHTML = '<span class="empty">Nobody on the roster yet.</span>';
+    return;
+  }
+  roster.slice().sort((a,b)=>a.name.localeCompare(b.name)).forEach(person=>{
+    const chip = document.createElement('span');
+    chip.className = 'person-chip';
+    chip.style.marginRight = '6px';
+    chip.innerHTML = `${person.name} ${isAdmin ? `<button class="del" data-id="${person.id}" style="margin-left:6px;">×</button>` : ''}`;
+    wrap.appendChild(chip);
+  });
+  wrap.querySelectorAll('.del').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      let roster = await loadRoster();
+      roster = roster.filter(p=>p.id!==btn.dataset.id);
+      await saveRoster(roster);
+      renderRosterNameList();
+  renderWslPersonSelect();
+      renderStaffingEstimate(selectedDate);
+      renderTimeline(selectedDate);
+      renderCoverageGaps();
+    });
+  });
+}
+
+document.getElementById('submitRosterBtn').addEventListener('click', async ()=>{
+  const input = document.getElementById('rosterName');
+  const name = input.value.trim();
+  const status = document.getElementById('rosterStatus');
+  if(!name){ status.style.color='var(--overlap)'; status.textContent='Enter a name first.'; return; }
+
+  const roster = await loadRoster();
+  if(roster.some(p=>p.name.toLowerCase()===name.toLowerCase())){
+    status.style.color='var(--overlap)'; status.textContent=`${name} is already on the roster.`; return;
+  }
+  roster.push({id:'r'+Date.now(), name});
+  await saveRoster(roster);
+
+  status.style.color='var(--success)';
+  status.textContent = `Added ${name} to the roster.`;
+  input.value = '';
+  renderRosterNameList();
+  renderWslPersonSelect();
+  renderStaffingEstimate(selectedDate);
+  renderTimeline(selectedDate);
+  renderCoverageGaps();
+});
+
+const todayISO = new Date().toISOString().slice(0,10);
+
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function daysInMonth(y,m){ return new Date(Date.UTC(y,m+1,0)).getUTCDate(); } // m is 0-indexed
+function pad2(n){ return String(n).padStart(2,'0'); }
+
+// overarching periods: one full calendar month each, August 2026 through April 2027
+function generatePeriods(){
+  const list = [];
+  let y = 2026, m = 7; // August 2026
+  const endY = 2027, endM = 3; // April 2027
+  while(true){
+    const dim = daysInMonth(y,m);
+    const mm = pad2(m+1);
+    const mon = MONTH_NAMES[m];
+    list.push({id:`${y}-${mm}`, label:`${mon} ${y}`, start:`${y}-${mm}-01`, end:`${y}-${mm}-${pad2(dim)}`});
+    if(y===endY && m===endM) break;
+    m++; if(m>11){ m=0; y++; }
+  }
+  return list;
+}
+const PERIODS = generatePeriods();
+
+function enumerateDates(startISO, endISO){
+  const list = [];
+  let d = new Date(startISO+'T00:00:00Z');
+  const end = new Date(endISO+'T00:00:00Z');
+  while(d.getTime() <= end.getTime()){
+    list.push(d.toISOString().slice(0,10));
+    d = new Date(d.getTime() + 86400000);
+  }
+  return list;
+}
+
+let activePeriodId = PERIODS[0].id;
+let DAYS = enumerateDates(PERIODS[0].start, PERIODS[0].end);
+let selectedDate = DAYS[0];
+document.getElementById('fDate').value = selectedDate;
+document.getElementById('fDate').min = DAYS[0];
+document.getElementById('fDate').max = DAYS[DAYS.length-1];
+
+function renderPeriodTabs(){
+  const wrap = document.getElementById('periodTabs');
+  wrap.innerHTML = '';
+  PERIODS.forEach(p=>{
+    const tab = document.createElement('div');
+    tab.className = 'period-tab' + (p.id===activePeriodId ? ' active' : '');
+    tab.textContent = p.label;
+    tab.addEventListener('click', ()=> setActivePeriod(p.id));
+    wrap.appendChild(tab);
+  });
+}
+
+// shared refresh cascade — everything that needs to reload when the active period
+// changes, whether that's from clicking a different tab or changing the period length
+async function refreshForActivePeriod(){
+  document.getElementById('fDate').value = selectedDate;
+  document.getElementById('fDate').min = DAYS[0];
+  document.getElementById('fDate').max = DAYS[DAYS.length-1];
+
+  renderPeriodTabs();
+  await loadShiftConfigForPeriod();
+  refreshSchedule(selectedDate);
+  renderDayStrip();
+  renderTimeline(selectedDate);
+  renderRosterNameList();
+  renderWslPersonSelect();
+  renderCoverageGaps();
+  renderSlotsRow();
+  await loadScheduleForPeriod();
+}
+
+async function setActivePeriod(periodId){
+  if(periodId===activePeriodId) return;
+  activePeriodId = periodId;
+  const period = PERIODS.find(p=>p.id===periodId);
+  DAYS = enumerateDates(period.start, period.end);
+  selectedDate = DAYS[0];
+  await refreshForActivePeriod();
+}
+
+async function refreshSchedule(dateStr){
+  const shifts = await renderTimeline(dateStr);
+  renderStaffingEstimate(dateStr);
+  return shifts;
+}
+
+async function loadExceptions(){
+  try{
+    const res = await storage.get('availability-exceptions:'+activePeriodId, true);
+    return res ? JSON.parse(res.value) : [];
+  }catch(e){ return []; }
+}
+async function saveExceptions(exceptions){
+  try{
+    await storage.set('availability-exceptions:'+activePeriodId, JSON.stringify(exceptions), true);
+  }catch(e){ console.error('save failed', e); }
+}
+
+// short optional note per person+date (e.g. "doctor appointment") — kept separate from
+// the shift toggles themselves since one note can cover however many shifts were marked
+// off that day
+function noteKey(name, dateStr){ return name+'|'+dateStr; }
+async function loadDayNotes(){
+  try{
+    const res = await storage.get('day-notes:'+activePeriodId, true);
+    return res ? JSON.parse(res.value) : {};
+  }catch(e){ return {}; }
+}
+async function saveDayNotes(notesMap){
+  try{
+    await storage.set('day-notes:'+activePeriodId, JSON.stringify(notesMap), true);
+  }catch(e){ console.error('save failed', e); }
+}
+
+async function renderDayStrip(){
+  const exceptions = await loadExceptions();
+  const strip = document.getElementById('dayStrip');
+  strip.innerHTML = '';
+  DAYS.forEach(dateStr=>{
+    const d = new Date(dateStr+'T00:00:00Z');
+    const dow = d.toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short'});
+    const dnum = d.getUTCDate();
+    const count = exceptions.filter(e=>e.date===dateStr).length;
+    const chip = document.createElement('div');
+    chip.className = 'daychip'
+      + (dateStr===selectedDate ? ' active' : '')
+      + (dateStr===todayISO ? ' today' : '');
+    chip.innerHTML = `
+      <div class="dow">${dow}</div>
+      <div class="dnum">${dnum}</div>
+      <div class="dcount ${count===0?'zero':''}" title="${count} unavailability ${count===1?'entry':'entries'} this day">${count===0?'·':count}</div>
+    `;
+    chip.addEventListener('click', ()=>{
+      selectedDate = dateStr;
+      document.getElementById('fDate').value = dateStr;
+      refreshSchedule(dateStr);
+      renderDayStrip();
+      renderTimeline(selectedDate);
+    });
+    strip.appendChild(chip);
+  });
+}
+
+document.getElementById('fDate').addEventListener('change', (e)=>{
+  if(DAYS.includes(e.target.value)){
+    selectedDate = e.target.value;
+    refreshSchedule(selectedDate);
+    renderDayStrip();
+    renderTimeline(selectedDate);
+  }
+});
+
+(async function initBoard(){
+  renderPeriodTabs();
+  await loadShiftConfigForPeriod();
+  refreshSchedule(selectedDate);
+  renderRosterNameList();
+  renderWslPersonSelect();
+  renderDayStrip();
+  renderTimeline(selectedDate);
+})();
+
+// ---- Shift configuration (times + Shift 4 on/off, scoped per period) ----
+async function loadShiftConfig(){
+  try{
+    const res = await storage.get('shift-config:'+activePeriodId, true);
+    if(!res) return null;
+    return JSON.parse(res.value);
+  }catch(e){ return null; }
+}
+async function saveShiftConfigToStorage(config){
+  try{
+    await storage.set('shift-config:'+activePeriodId, JSON.stringify(config), true);
+  }catch(e){ console.error('save failed', e); }
+}
+function applyShiftConfig(config){
+  if(!config) return;
+  BASE_SHIFTS = BASE_SHIFTS.map(s=>{
+    const c = config.shifts && config.shifts[s.id];
+    return c ? {...s, start:c.start, end:c.end} : s;
+  });
+  if(typeof config.shift4Enabled === 'boolean') shift4Enabled = config.shift4Enabled;
+  if(typeof config.shift1AutoStart === 'boolean') shift1AutoStart = config.shift1AutoStart;
+}
+async function loadShiftConfigForPeriod(){
+  BASE_SHIFTS = DEFAULT_SHIFTS.map(s=>({...s}));
+  shift4Enabled = true;
+  shift1AutoStart = true;
+  const config = await loadShiftConfig();
+  applyShiftConfig(config);
+  const toggle = document.getElementById('shift4Toggle');
+  if(toggle) toggle.checked = shift4Enabled;
+  const resetRow = document.getElementById('resetSunriseRow');
+  if(resetRow) resetRow.style.display = shift1AutoStart ? 'none' : 'block';
+  renderSlotsRow();
+  await renderWslPersonSelect();
+  refreshSchedule(selectedDate);
+}
+
+async function saveCurrentShiftConfig(){
+  const shifts = {};
+  BASE_SHIFTS.forEach(s=>{ shifts[s.id] = {start:s.start, end:s.end}; });
+  await saveShiftConfigToStorage({shifts, shift4Enabled, shift1AutoStart});
+}
+
+document.getElementById('shift4Toggle').addEventListener('change', async (e)=>{
+  shift4Enabled = e.target.checked;
+  await saveCurrentShiftConfig();
+  await refreshAfterShiftConfigChange();
+});
+
+document.getElementById('resetSunriseBtn').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  shift1AutoStart = true;
+  await saveCurrentShiftConfig();
+  await refreshAfterShiftConfigChange();
+});
+
+async function refreshAfterShiftConfigChange(){
+  document.getElementById('resetSunriseRow').style.display = shift1AutoStart ? 'none' : 'block';
+  renderSlotsRow();
+  refreshSchedule(selectedDate);
+  renderWeeklyShiftList();
+  renderCoverageGaps();
+  renderTimeline(selectedDate);
+  currentSchedule = null;
+  renderScheduleTable(null);
+}
+
+// ---- Schedule generation ----
+function renderSlotsRow(){
+  const wrap = document.getElementById('slotsRow');
+  wrap.innerHTML = '';
+  activeShifts().forEach(s=>{
+    const item = document.createElement('div');
+    item.className = 'slotitem';
+    item.innerHTML = `<label>${s.name} needs</label><input type="number" id="slots-${s.id}" min="0" value="1">`;
+    wrap.appendChild(item);
+  });
+}
+renderSlotsRow();
+document.getElementById('slotsRow').addEventListener('input', ()=> {
+  renderStaffingEstimate(selectedDate);
+  renderCoverageGaps();
+});
+
+function renderStaffingEstimate(dateStr){
+  const {shifts} = getShiftsForDate(dateStr);
+  const slots = {};
+  let bareMinPeople = 0;
+  activeShifts().forEach(s=>{
+    const n = parseInt((document.getElementById('slots-'+s.id)||{}).value, 10) || 0;
+    slots[s.id] = n;
+    bareMinPeople += n;
+  });
+
+  const bufferedPeople = Math.max(1, Math.ceil(bareMinPeople * STAFFING_BUFFER));
+  const weeklyHours = shifts.reduce((sum,s)=> sum + (s.end - s.start) * (slots[s.id]||0), 0) * 7;
+  const hoursPerPerson = bufferedPeople > 0 ? weeklyHours / bufferedPeople : 0;
+
+  document.getElementById('statPeople').textContent = bufferedPeople;
+  document.getElementById('statHours').textContent = hoursPerPerson.toFixed(1);
+
+  renderRosterLoad(dateStr, weeklyHours);
+}
+renderStaffingEstimate(selectedDate);
+
+async function renderRosterLoad(dateStr, weeklyHours){
+  const roster = await loadRoster();
+  const count = roster.length;
+  const avgHours = count > 0 ? weeklyHours / count : 0;
+
+  document.getElementById('statRosterCount').textContent = count;
+  document.getElementById('statRosterHours').textContent = count > 0 ? avgHours.toFixed(1) : '–';
+}
+
+async function renderCoverageGaps(){
+  const roster = await loadRoster();
+  const exceptions = await loadExceptions();
+  const slots = {};
+  activeShifts().forEach(s=>{ slots[s.id] = parseInt((document.getElementById('slots-'+s.id)||{}).value, 10) || 0; });
+
+  // For each date+shift in the period, figure out how many people could actually
+  // cover it (roster minus anyone marked unavailable that day for that shift). If a
+  // schedule's already been generated, use its real assigned count instead — that
+  // reflects what actually happened (including cases where fairness/Rule 1 left a
+  // shift short even though enough people were nominally available).
+  const gaps = [];
+  DAYS.forEach(dateStr=>{
+    const dateExceptions = exceptions.filter(e=>e.date===dateStr);
+    activeShifts().forEach(s=>{
+      const need = slots[s.id];
+      if(need<=0) return;
+
+      let have;
+      if(currentSchedule && currentSchedule[dateStr] && currentSchedule[dateStr][s.id]){
+        have = currentSchedule[dateStr][s.id].length;
+      }else{
+        const excepted = new Set(dateExceptions.filter(e=>e.shiftIds.includes(s.id)).map(e=>e.name));
+        have = roster.filter(p=>!excepted.has(p.name)).length;
+      }
+
+      if(have < need) gaps.push({date:dateStr, shift:s, have, need});
+    });
+  });
+
+  gaps.sort((a,b)=> a.date.localeCompare(b.date) || (b.need-b.have)-(a.need-a.have));
+
+  const banner = document.getElementById('gapBanner');
+  const countEl = document.getElementById('gapBannerCount');
+  const wrap = document.getElementById('gapBannerList');
+
+  if(gaps.length===0){
+    banner.style.display = 'none';
+    wrap.innerHTML = '';
+    return;
+  }
+
+  banner.style.display = 'block';
+  countEl.textContent = ` — ${gaps.length} shift${gaps.length===1?'':'s'} short-staffed`;
+
+  const MAX_SHOWN = 6;
+  wrap.innerHTML = '';
+  gaps.slice(0, MAX_SHOWN).forEach(g=>{
+    const label = new Date(g.date+'T00:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'});
+    const detail = g.have===0 ? 'nobody available' : `${g.have} available, needs ${g.need}`;
+    const row = document.createElement('div');
+    row.className = 'gap-row';
+    row.innerHTML = `
+      <div class="gap-main"><span class="gap-day">${label}</span><span class="gap-shift">${g.shift.name}</span></div>
+      <div class="gap-detail">${detail}</div>
+    `;
+    wrap.appendChild(row);
+  });
+  if(gaps.length > MAX_SHOWN){
+    const more = document.createElement('div');
+    more.className = 'gap-more';
+    more.textContent = `+ ${gaps.length - MAX_SHOWN} more`;
+    wrap.appendChild(more);
+  }
+}
+renderCoverageGaps();
+
+async function renderScheduleTable(datedSchedule){
+  const table = document.getElementById('scheduleTable');
+  const dragRoster = document.getElementById('dragRoster');
+  const note = document.getElementById('dragEditNote');
+  if(!datedSchedule){
+    table.innerHTML = '';
+    if(dragRoster) dragRoster.innerHTML = '';
+    if(note) note.innerHTML = '';
+    return;
+  }
+
+  if(note){
+    note.innerHTML = isAdmin
+      ? '<p class="drag-edit-note">Drag a name from the roster below into any cell, or drag a name between cells to move it. Click the × on a chip to remove them from that shift.</p>'
+      : '<p class="drag-edit-note">Unlock admin (top right) to drag people in and out of the schedule directly.</p>';
+  }
+
+  if(dragRoster){
+    dragRoster.innerHTML = '';
+    if(isAdmin){
+      const roster = await loadRoster();
+      const names = roster.map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      names.forEach(n=>{
+        const chip = document.createElement('span');
+        chip.className = 'drag-chip';
+        chip.draggable = true;
+        chip.textContent = n;
+        chip.addEventListener('dragstart', (e)=>{
+          e.dataTransfer.setData('text/plain', JSON.stringify({name:n}));
+        });
+        dragRoster.appendChild(chip);
+      });
+    }
+  }
+
+  table.innerHTML = '';
+  const thead = document.createElement('thead');
+  thead.innerHTML = `<tr><th>Date</th>${activeShifts().map(s=>`<th>${s.name}</th>`).join('')}</tr>`;
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+
+  DAYS.forEach(dateStr=>{
+    const d = new Date(dateStr+'T00:00:00Z');
+    const label = d.toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'});
+    const dayRow = datedSchedule[dateStr] || {};
+    const tr = document.createElement('tr');
+    tr.className = dateStr===todayISO ? 'today' : '';
+    const dateTd = document.createElement('td');
+    dateTd.className = 'datecell';
+    dateTd.textContent = label;
+    tr.appendChild(dateTd);
+
+    activeShifts().forEach(s=>{
+      const names = dayRow[s.id] || [];
+      const td = document.createElement('td');
+      td.className = 'schedule-cell' + (names.length ? '' : ' unfilled');
+      buildScheduleCell(td, dateStr, s.id, names);
+
+      if(isAdmin){
+        td.addEventListener('dragover', (e)=>{ e.preventDefault(); td.classList.add('drag-over'); });
+        td.addEventListener('dragleave', ()=> td.classList.remove('drag-over'));
+        td.addEventListener('drop', async (e)=>{
+          e.preventDefault();
+          td.classList.remove('drag-over');
+          let data;
+          try{ data = JSON.parse(e.dataTransfer.getData('text/plain')); }catch(err){ return; }
+          await handleScheduleDrop(data, dateStr, s.id);
+        });
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+}
+
+function buildScheduleCell(td, dateStr, shiftId, names){
+  td.innerHTML = '';
+  if(names.length===0){
+    const span = document.createElement('span');
+    span.className = 'unfilled-label';
+    span.textContent = 'unfilled';
+    td.appendChild(span);
+  }
+  names.forEach(n=>{
+    const chip = document.createElement('span');
+    chip.className = 'schedule-chip';
+    chip.draggable = isAdmin;
+    chip.textContent = n;
+    if(isAdmin){
+      chip.addEventListener('dragstart', (e)=>{
+        e.dataTransfer.setData('text/plain', JSON.stringify({name:n, fromDate:dateStr, fromShift:shiftId}));
+      });
+      const xBtn = document.createElement('button');
+      xBtn.type = 'button';
+      xBtn.className = 'chip-x';
+      xBtn.textContent = '×';
+      xBtn.addEventListener('click', async (e)=>{
+        e.stopPropagation();
+        await removePersonFromSlot(dateStr, shiftId, n);
+      });
+      chip.appendChild(xBtn);
+    }
+    td.appendChild(chip);
+  });
+}
+
+async function persistCurrentSchedule(){
+  try{ await storage.set('generated-schedule-dated:'+activePeriodId, JSON.stringify(currentSchedule), true); }catch(e){}
+}
+
+async function handleScheduleDrop(data, targetDate, targetShift){
+  if(!data || !data.name) return;
+  const name = data.name;
+  if(!currentSchedule) currentSchedule = {};
+  if(!currentSchedule[targetDate]) currentSchedule[targetDate] = {};
+  activeShifts().forEach(s=>{ if(!currentSchedule[targetDate][s.id]) currentSchedule[targetDate][s.id] = []; });
+
+  if(data.fromDate && data.fromShift && currentSchedule[data.fromDate] && currentSchedule[data.fromDate][data.fromShift]){
+    currentSchedule[data.fromDate][data.fromShift] = currentSchedule[data.fromDate][data.fromShift].filter(n=>n!==name);
+  }
+  if(!currentSchedule[targetDate][targetShift].includes(name)){
+    currentSchedule[targetDate][targetShift].push(name);
+  }
+
+  await persistCurrentSchedule();
+  await renderScheduleTable(currentSchedule);
+  renderTimeline(selectedDate);
+  await renderCoverageGaps();
+}
+
+async function removePersonFromSlot(dateStr, shiftId, name){
+  if(!currentSchedule || !currentSchedule[dateStr] || !currentSchedule[dateStr][shiftId]) return;
+  currentSchedule[dateStr][shiftId] = currentSchedule[dateStr][shiftId].filter(n=>n!==name);
+  await persistCurrentSchedule();
+  await renderScheduleTable(currentSchedule);
+  renderTimeline(selectedDate);
+  await renderCoverageGaps();
+}
+
+async function generateSchedule(){
+  const roster = await loadRoster();
+  const rosterNames = roster.map(p=>p.name);
+  const exceptions = await loadExceptions();
+  const slots = {};
+  activeShifts().forEach(s=>{ slots[s.id] = parseInt(document.getElementById('slots-'+s.id).value,10) || 0; });
+
+  const FIRST_ID = activeShifts()[0].id, LAST_ID = activeShifts()[activeShifts().length-1].id;
+
+  // The only hard rule: whoever closed (last shift) yesterday can't open (first shift)
+  // today — not enough rest between a closing shift and an opening shift. Otherwise,
+  // just balance the workload as evenly as possible across everyone and honor whatever
+  // they've marked themselves unavailable for.
+  function passesRule1(prev, s){
+    return !(prev===LAST_ID && s.id===FIRST_ID);
+  }
+  const fairnessSort = (loadCount) => (a,b) => ((loadCount[a]||0)-(loadCount[b]||0)) || a.localeCompare(b);
+
+  // Fills `need` seats for shift s from `pool` (already filtered for template match,
+  // day match, not unavailable, not already working elsewhere that day — all hard).
+  // Only constraint beyond that is Rule 1; everyone else is picked purely by who's
+  // worked the fewest shifts so far, so the load stays as even as possible.
+  function fillSeats(pool, need, prevMap, s, loadCount){
+    const eligible = pool.filter(name => passesRule1(prevMap[name], s)).sort(fairnessSort(loadCount));
+    const chosen = eligible.slice(0, need);
+    chosen.forEach(name=>{ loadCount[name] = (loadCount[name]||0)+1; });
+    return chosen;
+  }
+
+  const prevWeekday = d => (d+6)%7;
+  // process Mon→Sun so each day can normally see the previous day's assignments already
+  // computed within the same pass — except Monday, whose "previous day" is Sunday, which
+  // isn't known yet on a first pass. Resolved below: one pass to learn what Sunday looks
+  // like, a second pass that seeds Monday with it and cascades fresh through the rest of
+  // the week, then a bounded, one-time repair of just Monday against whatever Sunday the
+  // second pass actually produced (never re-cascaded further, so it can't oscillate).
+  const WEEK_ORDER = [1,2,3,4,5,6,0];
+
+  function buildWeek(mondaySeed, loadCount){
+    const weeklySchedule = {};
+
+    WEEK_ORDER.forEach(weekday=>{
+      const assignedToday = new Set(); // one shift per person per weekday, even if eligible for more
+      weeklySchedule[weekday] = {};
+
+      let prevShiftOf;
+      if(weekday===1 && mondaySeed){
+        prevShiftOf = mondaySeed;
+      }else{
+        const prevDay = prevWeekday(weekday);
+        const prevAssign = weeklySchedule[prevDay];
+        prevShiftOf = {};
+        if(prevAssign){ activeShifts().forEach(ps=>{ (prevAssign[ps.id]||[]).forEach(n=>{ prevShiftOf[n]=ps.id; }); }); }
+      }
+
+      activeShifts().forEach(s=>{
+        const need = slots[s.id];
+        weeklySchedule[weekday][s.id] = [];
+        if(need <= 0) return;
+
+        const seen = new Set();
+        let pool = [];
+        rosterNames.forEach(name=>{
+          if(!assignedToday.has(name) && !seen.has(name)){
+            seen.add(name);
+            pool.push(name);
+          }
+        });
+
+        const chosen = fillSeats(pool, need, prevShiftOf, s, loadCount);
+        chosen.forEach(name=>{
+          weeklySchedule[weekday][s.id].push(name);
+          assignedToday.add(name);
+        });
+      });
+    });
+    return {weeklySchedule};
+  }
+
+  function dayShiftMap(dayAssign){
+    const map = {};
+    if(dayAssign){ activeShifts().forEach(ps=>{ (dayAssign[ps.id]||[]).forEach(n=>{ map[n]=ps.id; }); }); }
+    return map;
+  }
+
+  // pass 1: learn what Sunday looks like (Monday necessarily treated as fresh here)
+  const scratchLoad = {};
+  const pass1 = buildWeek(null, scratchLoad);
+
+  // pass 2: seed Monday with pass 1's Sunday, cascade fresh through Tue–Sun from there —
+  // this is the real result
+  const loadCount = {};
+  const { weeklySchedule } = buildWeek(dayShiftMap(pass1.weeklySchedule[0]), loadCount);
+
+  // Monday was built against pass 1's Sunday, but pass 2's own Sunday (built from a
+  // possibly-different Monday) can end up not perfectly matching it — specifically, someone
+  // could land on Monday's opening shift who, per the real final Sunday, closed the night
+  // before. With Rule 2 gone, Rule 1 is the only thing that can still conflict here, and
+  // fixing it doesn't risk cascading into Tuesday (which only cares who closed Monday, not
+  // who opened it) — so this actually repairs it instead of just flagging it.
+  const finalSundayShiftOf = dayShiftMap(weeklySchedule[0]);
+  const kept = weeklySchedule[1][FIRST_ID].filter(name => finalSundayShiftOf[name] !== LAST_ID);
+  const shortfall = weeklySchedule[1][FIRST_ID].length - kept.length;
+  weeklySchedule[1][FIRST_ID] = kept;
+  if(shortfall > 0){
+    const stillAssigned = new Set(Object.values(weeklySchedule[1]).flat());
+    const seen = new Set(kept);
+    const pool = rosterNames.filter(name => !stillAssigned.has(name) && finalSundayShiftOf[name]!==LAST_ID && !seen.has(name));
+    const extra = pool.sort(fairnessSort(loadCount)).slice(0, shortfall);
+    extra.forEach(name=>{ weeklySchedule[1][FIRST_ID].push(name); loadCount[name] = (loadCount[name]||0)+1; });
+  }
+
+  // expand the recurring pattern across all real dates in this period
+  const datedSchedule = {};
+  DAYS.forEach(dateStr=>{
+    const weekday = new Date(dateStr+'T00:00:00Z').getUTCDay();
+    const dayAssign = {};
+    activeShifts().forEach(s=>{ dayAssign[s.id] = (weeklySchedule[weekday][s.id] || []).slice(); });
+    datedSchedule[dateStr] = dayAssign;
+  });
+
+  // apply one-off unavailability (always hard): pull the person off that specific date/shift
+  // and backfill from remaining eligible people for that weekday, in chronological order so
+  // each backfill can see the actual previous date's (possibly also backfilled) assignments
+  DAYS.forEach(dateStr=>{
+    const weekday = new Date(dateStr+'T00:00:00Z').getUTCDay();
+    const dateExceptions = exceptions.filter(e=>e.date===dateStr);
+    const dayAssign = datedSchedule[dateStr];
+    if(dateExceptions.length===0) return;
+
+    const dateIdx = DAYS.indexOf(dateStr);
+    const prevDateStr = dateIdx>0 ? DAYS[dateIdx-1] : null;
+    const prevShiftOfActual = {};
+    if(prevDateStr && datedSchedule[prevDateStr]){
+      activeShifts().forEach(ps=>{ (datedSchedule[prevDateStr][ps.id]||[]).forEach(n=>{ prevShiftOfActual[n]=ps.id; }); });
+    }
+
+    activeShifts().forEach(s=>{
+      const excepted = new Set(dateExceptions.filter(e=>e.shiftIds.includes(s.id)).map(e=>e.name));
+      if(excepted.size===0) return;
+
+      // unavailability always wins
+      dayAssign[s.id] = dayAssign[s.id].filter(n=>!excepted.has(n));
+
+      const target = slots[s.id];
+      const shortfall = target - dayAssign[s.id].length;
+      if(shortfall<=0) return;
+
+      const assignedTodayNow = new Set(Object.values(dayAssign).flat());
+      let pool = [];
+      const seen = new Set(dayAssign[s.id]);
+      rosterNames.forEach(name=>{
+        if(!assignedTodayNow.has(name) && !excepted.has(name) && !seen.has(name)){
+          seen.add(name);
+          pool.push(name);
+        }
+      });
+      const filled = fillSeats(pool, shortfall, prevShiftOfActual, s, loadCount);
+      dayAssign[s.id] = dayAssign[s.id].concat(filled);
+    });
+  });
+
+  try{
+    await storage.set('generated-schedule-dated:'+activePeriodId, JSON.stringify(datedSchedule), true);
+  }catch(e){}
+  currentSchedule = datedSchedule;
+  await renderScheduleTable(datedSchedule);
+  renderTimeline(selectedDate);
+  await renderCoverageGaps();
+}
+
+document.getElementById('generateBtn').addEventListener('click', generateSchedule);
+
+async function loadScheduleForPeriod(){
+  try{
+    const res = await storage.get('generated-schedule-dated:'+activePeriodId, true);
+    currentSchedule = res ? JSON.parse(res.value) : null;
+  }catch(e){
+    currentSchedule = null;
+  }
+  await renderScheduleTable(currentSchedule);
+  renderTimeline(selectedDate);
+  await renderCoverageGaps();
+}
+loadScheduleForPeriod();
+
+// one-time reset: wipes existing templates/exceptions and seeds 6 example candidates, then generates
+(async function resetAndSeedExamples(){
+  const SEED_KEY = 'seed-2026-07-28-roster-6';
+  let alreadySeeded = false;
+  try{
+    const res = await storage.get(SEED_KEY, true);
+    alreadySeeded = !!res;
+  }catch(e){ alreadySeeded = false; }
+  if(alreadySeeded) return;
+
+  // everyone's assumed available any day, any shift — just a simple name list now
+  const exampleRoster = [
+    {id:'r-r1', name:'Alex Chen'},
+    {id:'r-r2', name:'Bailey Rivera'},
+    {id:'r-r3', name:'Casey Nguyen'},
+    {id:'r-r4', name:'Dana Kim'},
+    {id:'r-r5', name:'Emerson Park'},
+    {id:'r-r6', name:'Frankie Lopez'},
+  ];
+
+  // a handful of one-off unavailability entries within the first period (Aug 2026)
+  const exampleExceptions = [
+    {id:'x-r1', name:'Alex Chen',     date:'2026-08-04', shiftIds:['s2']},
+    {id:'x-r2', name:'Bailey Rivera', date:'2026-08-09', shiftIds:['s3']},
+    {id:'x-r3', name:'Casey Nguyen',  date:'2026-08-08', shiftIds:['s1','s2','s3','s4']},
+    {id:'x-r4', name:'Dana Kim',      date:'2026-08-06', shiftIds:['s4']},
+    {id:'x-r5', name:'Frankie Lopez', date:'2026-08-15', shiftIds:['s3','s4']},
+    {id:'x-r6', name:'Emerson Park',  date:'2026-08-03', shiftIds:['s1']},
+  ];
+
+  try{
+    await storage.set('team-roster:'+activePeriodId, JSON.stringify(exampleRoster), true);
+    await storage.set('availability-exceptions:'+activePeriodId, JSON.stringify(exampleExceptions), true);
+    try{ await storage.delete('generated-schedule-dated:'+activePeriodId, true); }catch(e){}
+    await storage.set(SEED_KEY, 'done', true);
+  }catch(e){ console.error('reset/seed failed', e); }
+
+  renderPeriodTabs();
+  renderRosterNameList();
+  renderWslPersonSelect();
+  renderStaffingEstimate(selectedDate);
+  renderDayStrip();
+  renderTimeline(selectedDate);
+  renderCoverageGaps();
+  renderStaffingEstimate(selectedDate);
+  await generateSchedule();
+})();
+</script>
+</body>
+</html>
